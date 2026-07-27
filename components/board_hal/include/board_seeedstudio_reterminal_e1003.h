@@ -46,9 +46,11 @@
 #define BOARD_HAL_BAT_ADC_PIN ADC_CHANNEL_0  // GPIO 1
 #define BOARD_HAL_BAT_EN_PIN GPIO_NUM_40
 
-// Onboard LED
+// Onboard LED (green USER_LED: 3V3 -> 10K -> LED -> GPIO16, so the pin sinks
+// current — active LOW. Driving it "high = on" left the LED lit whenever the
+// firmware thought it was off, including latched on through deep sleep.)
 #define BOARD_HAL_LED_PIN GPIO_NUM_16
-#define BOARD_HAL_LED_INVERTED false
+#define BOARD_HAL_LED_INVERTED true
 
 // Display Configuration (panel is native landscape 1872x1404; IT8951 reports it)
 #define BOARD_HAL_DISPLAY_ROTATION_DEG 0
