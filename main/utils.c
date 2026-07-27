@@ -178,32 +178,54 @@ esp_err_t apply_config_from_json(cJSON *root)
         periodic_tasks_check_and_run();
     }
 
+    // Clients PATCH only changed fields, so each static address may arrive on
+    // its own (edited while already in static mode) or be absent when the
+    // request merely flips ip_mode. Store what's present, then a switch to
+    // static validates the effective (request-or-stored) values as a set.
+    esp_ip4_addr_t parsed;
+    item = cJSON_GetObjectItem(root, "static_ip");
+    if (item && cJSON_IsString(item)) {
+        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+            utils_set_config_error("Invalid static IP address");
+            return ESP_FAIL;
+        }
+        config_manager_set_static_ip(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "static_netmask");
+    if (item && cJSON_IsString(item)) {
+        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+            utils_set_config_error("Invalid static netmask");
+            return ESP_FAIL;
+        }
+        config_manager_set_static_netmask(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "static_gateway");
+    if (item && cJSON_IsString(item)) {
+        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+            utils_set_config_error("Invalid static gateway");
+            return ESP_FAIL;
+        }
+        config_manager_set_static_gateway(cJSON_GetStringValue(item));
+    }
+
     item = cJSON_GetObjectItem(root, "ip_mode");
     if (item && cJSON_IsString(item)) {
         bool want_static = (strcmp(cJSON_GetStringValue(item), "static") == 0);
         if (want_static) {
-            cJSON *ip = cJSON_GetObjectItem(root, "static_ip");
-            cJSON *mask = cJSON_GetObjectItem(root, "static_netmask");
-            cJSON *gw = cJSON_GetObjectItem(root, "static_gateway");
-            esp_ip4_addr_t parsed;
-            if (!ip || !cJSON_IsString(ip) ||
-                esp_netif_str_to_ip4(cJSON_GetStringValue(ip), &parsed) != ESP_OK) {
+            if (esp_netif_str_to_ip4(config_manager_get_static_ip(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static IP address");
                 return ESP_FAIL;
             }
-            if (!mask || !cJSON_IsString(mask) ||
-                esp_netif_str_to_ip4(cJSON_GetStringValue(mask), &parsed) != ESP_OK) {
+            if (esp_netif_str_to_ip4(config_manager_get_static_netmask(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static netmask");
                 return ESP_FAIL;
             }
-            if (!gw || !cJSON_IsString(gw) ||
-                esp_netif_str_to_ip4(cJSON_GetStringValue(gw), &parsed) != ESP_OK) {
+            if (esp_netif_str_to_ip4(config_manager_get_static_gateway(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static gateway");
                 return ESP_FAIL;
             }
-            config_manager_set_static_ip(cJSON_GetStringValue(ip));
-            config_manager_set_static_netmask(cJSON_GetStringValue(mask));
-            config_manager_set_static_gateway(cJSON_GetStringValue(gw));
             config_manager_set_ip_mode(IP_MODE_STATIC);
         } else {
             config_manager_set_ip_mode(IP_MODE_DHCP);
@@ -213,7 +235,6 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "dns_server");
     if (item && cJSON_IsString(item)) {
         const char *dns = cJSON_GetStringValue(item);
-        esp_ip4_addr_t parsed;
         if (dns[0] != '\0' && esp_netif_str_to_ip4(dns, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid DNS server address");
             return ESP_FAIL;
