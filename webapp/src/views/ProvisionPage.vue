@@ -29,6 +29,15 @@ const statusMessage = ref("");
 const networks = ref([]);
 const scanning = ref(false);
 
+// Advanced network settings (#43): static IP + DNS override for networks
+// without DHCP. Collapsed by default — almost everyone uses DHCP.
+const showAdvanced = ref(false);
+const ipMode = ref("dhcp");
+const staticIp = ref("");
+const staticNetmask = ref("255.255.255.0");
+const staticGateway = ref("");
+const dnsServer = ref("");
+
 function signalIcon(rssi) {
   if (rssi >= -50) return ICON_PATHS.wifiStrength4;
   if (rssi >= -60) return ICON_PATHS.wifiStrength3;
@@ -82,6 +91,15 @@ async function submitForm() {
   formData.append("ssid", ssid.value);
   formData.append("password", password.value);
   formData.append("deviceName", deviceName.value);
+  formData.append("ipMode", ipMode.value);
+  if (ipMode.value === "static") {
+    formData.append("staticIp", staticIp.value.trim());
+    formData.append("staticNetmask", staticNetmask.value.trim());
+    formData.append("staticGateway", staticGateway.value.trim());
+  }
+  if (dnsServer.value.trim()) {
+    formData.append("dnsServer", dnsServer.value.trim());
+  }
 
   try {
     const response = await fetch("/save", {
@@ -202,8 +220,78 @@ async function submitForm() {
             variant="outlined"
             :disabled="loading"
             hint="Used for mDNS hostname"
-            class="mb-4"
+            class="mb-2"
           />
+
+          <div class="mb-4">
+            <button
+              type="button"
+              class="advanced-toggle"
+              :disabled="loading"
+              @click="showAdvanced = !showAdvanced"
+            >
+              {{ showAdvanced ? "▾" : "▸" }} Advanced network settings
+            </button>
+
+            <div v-if="showAdvanced" class="mt-2">
+              <v-select
+                v-model="ipMode"
+                :items="[
+                  { title: 'Automatic (DHCP)', value: 'dhcp' },
+                  { title: 'Static IP', value: 'static' },
+                ]"
+                label="IP Configuration"
+                variant="outlined"
+                density="compact"
+                :disabled="loading"
+                class="mb-2"
+              />
+
+              <template v-if="ipMode === 'static'">
+                <v-text-field
+                  v-model="staticIp"
+                  label="IP Address"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="loading"
+                  placeholder="192.168.1.50"
+                  class="mb-2"
+                />
+                <v-text-field
+                  v-model="staticNetmask"
+                  label="Netmask"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="loading"
+                  class="mb-2"
+                />
+                <v-text-field
+                  v-model="staticGateway"
+                  label="Gateway"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="loading"
+                  placeholder="192.168.1.1"
+                  class="mb-2"
+                />
+              </template>
+
+              <v-text-field
+                v-model="dnsServer"
+                label="DNS Server (optional)"
+                variant="outlined"
+                density="compact"
+                :disabled="loading"
+                :hint="
+                  ipMode === 'static'
+                    ? 'Leave empty to use the gateway'
+                    : 'Leave empty to use DHCP-provided DNS'
+                "
+                persistent-hint
+                class="mb-2"
+              />
+            </div>
+          </div>
 
           <v-btn type="submit" color="primary" size="large" block :loading="loading">
             Connect to WiFi
@@ -254,5 +342,19 @@ async function submitForm() {
 
 .password-toggle:hover {
   opacity: 1;
+}
+
+.advanced-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: rgb(var(--v-theme-primary));
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.advanced-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

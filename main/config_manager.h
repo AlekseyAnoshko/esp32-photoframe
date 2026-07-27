@@ -24,6 +24,20 @@ const char *config_manager_get_timezone(void);
 void config_manager_set_ntp_server(const char *server);
 const char *config_manager_get_ntp_server(void);
 
+// Advanced network settings (#43), same collapsed UI section as the NTP server
+// above: static IP (instead of DHCP) and DNS override. The DNS override applies
+// in both IP modes (empty string = automatic). Values are dotted IPv4 strings.
+void config_manager_set_ip_mode(ip_mode_t mode);
+ip_mode_t config_manager_get_ip_mode(void);
+void config_manager_set_static_ip(const char *ip);
+const char *config_manager_get_static_ip(void);
+void config_manager_set_static_netmask(const char *mask);
+const char *config_manager_get_static_netmask(void);
+void config_manager_set_static_gateway(const char *gw);
+const char *config_manager_get_static_gateway(void);
+void config_manager_set_dns_server(const char *dns);
+const char *config_manager_get_dns_server(void);
+
 void config_manager_set_display_orientation(display_orientation_t orientation);
 display_orientation_t config_manager_get_display_orientation(void);
 

@@ -22,6 +22,12 @@ export const useSettingsStore = defineStore("settings", () => {
     deviceName: "PhotoFrame",
     timezoneOffset: 0,
     ntpServer: "pool.ntp.org",
+    // Network: static IP / DNS override (#43)
+    ipMode: "dhcp",
+    staticIp: "",
+    staticNetmask: "255.255.255.0",
+    staticGateway: "",
+    dnsServer: "",
     displayOrientation: "landscape",
     displayRotationDeg: 180,
     wifiSsid: "",
@@ -197,6 +203,11 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
       deviceSettings.value.ntpServer = data.ntp_server || "pool.ntp.org";
+      deviceSettings.value.ipMode = data.ip_mode || "dhcp";
+      deviceSettings.value.staticIp = data.static_ip || "";
+      deviceSettings.value.staticNetmask = data.static_netmask || "255.255.255.0";
+      deviceSettings.value.staticGateway = data.static_gateway || "";
+      deviceSettings.value.dnsServer = data.dns_server || "";
       deviceSettings.value.wifiSsid = data.wifi_ssid || "";
       // Don't load password from server for security
       deviceSettings.value.wifiPassword = "";
@@ -252,6 +263,11 @@ export const useSettingsStore = defineStore("settings", () => {
       display_orientation: deviceSettings.value.displayOrientation,
       device_name: deviceSettings.value.deviceName,
       ntp_server: deviceSettings.value.ntpServer,
+      ip_mode: deviceSettings.value.ipMode,
+      static_ip: deviceSettings.value.staticIp,
+      static_netmask: deviceSettings.value.staticNetmask,
+      static_gateway: deviceSettings.value.staticGateway,
+      dns_server: deviceSettings.value.dnsServer,
       timezone: timezone,
       access_token: deviceSettings.value.accessToken,
       http_header_key: deviceSettings.value.httpHeaderKey,

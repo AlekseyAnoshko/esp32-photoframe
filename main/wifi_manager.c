@@ -6,6 +6,7 @@
 #include "config_manager.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -27,6 +28,8 @@ static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 static bool s_is_connected = false;
 static esp_netif_t *s_sta_netif = NULL;
+
+static void apply_dns_override(void);
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                           void *event_data)
@@ -52,6 +55,9 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        // Applied after the address is up so it overrides DHCP-provided DNS
+        // servers too (#43).
+        apply_dns_override();
         s_retry_num = 0;
         s_is_connected = true;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
@@ -139,12 +145,67 @@ esp_err_t wifi_manager_init(void)
     return ESP_OK;
 }
 
+esp_err_t wifi_manager_apply_ip_config(void)
+{
+    if (!s_sta_netif) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (config_manager_get_ip_mode() == IP_MODE_STATIC) {
+        esp_netif_ip_info_t ip_info = {0};
+        if (esp_netif_str_to_ip4(config_manager_get_static_ip(), &ip_info.ip) != ESP_OK ||
+            esp_netif_str_to_ip4(config_manager_get_static_netmask(), &ip_info.netmask) != ESP_OK ||
+            esp_netif_str_to_ip4(config_manager_get_static_gateway(), &ip_info.gw) != ESP_OK) {
+            // Never brick the connection on a malformed config — fall back to
+            // DHCP so the frame stays reachable and the user can fix it.
+            ESP_LOGE(TAG, "Invalid static IP config, falling back to DHCP");
+            esp_netif_dhcpc_start(s_sta_netif);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        esp_netif_dhcpc_stop(s_sta_netif);
+        esp_netif_set_ip_info(s_sta_netif, &ip_info);
+        ESP_LOGI(TAG, "Static IP applied: %s/%s gw %s", config_manager_get_static_ip(),
+                 config_manager_get_static_netmask(), config_manager_get_static_gateway());
+    } else {
+        // Make sure DHCP runs when switching back from a static config.
+        // Returns ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED in the normal case.
+        esp_netif_dhcpc_start(s_sta_netif);
+    }
+    return ESP_OK;
+}
+
+// Apply the DNS override (if configured). Called after GOT_IP so it takes
+// precedence over DHCP-provided servers in DHCP mode; in static mode it is the
+// only DNS source (defaults to the gateway when unset).
+static void apply_dns_override(void)
+{
+    const char *dns = config_manager_get_dns_server();
+    if ((dns == NULL || dns[0] == '\0') && config_manager_get_ip_mode() == IP_MODE_STATIC) {
+        dns = config_manager_get_static_gateway();
+    }
+    if (dns == NULL || dns[0] == '\0') {
+        return;
+    }
+
+    esp_netif_dns_info_t dns_info = {0};
+    if (esp_netif_str_to_ip4(dns, &dns_info.ip.u_addr.ip4) != ESP_OK) {
+        ESP_LOGE(TAG, "Invalid DNS server: %s", dns);
+        return;
+    }
+    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+    esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+    ESP_LOGI(TAG, "DNS server set to: %s", dns);
+}
+
 esp_err_t wifi_manager_connect(const char *ssid, const char *password)
 {
     if (!ssid || strlen(ssid) == 0) {
         ESP_LOGE(TAG, "SSID is empty");
         return ESP_ERR_INVALID_ARG;
     }
+
+    wifi_manager_apply_ip_config();
 
     wifi_config_t wifi_config = {0};
     strncpy((char *) wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);

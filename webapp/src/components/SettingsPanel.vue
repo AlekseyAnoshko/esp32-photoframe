@@ -503,17 +503,78 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
-            <v-row>
-              <v-col cols="12" md="6">
-                <v-text-field
-                  v-model="settingsStore.deviceSettings.ntpServer"
-                  label="NTP Server"
-                  variant="outlined"
-                  hint="e.g., pool.ntp.org, cn.pool.ntp.org"
-                  persistent-hint
-                />
-              </v-col>
-            </v-row>
+            <!-- Advanced network settings (#43): collapsed by default — NTP,
+                 static IP and DNS override are tinkerer territory. -->
+            <v-expansion-panels class="mt-2" variant="accordion">
+              <v-expansion-panel title="Advanced network settings" elevation="0">
+                <v-expansion-panel-text>
+                  <v-row>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.ntpServer"
+                        label="NTP Server"
+                        variant="outlined"
+                        hint="e.g., pool.ntp.org, cn.pool.ntp.org, or a local IP"
+                        persistent-hint
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-select
+                        v-model="settingsStore.deviceSettings.ipMode"
+                        :items="[
+                          { title: 'Automatic (DHCP)', value: 'dhcp' },
+                          { title: 'Static IP', value: 'static' },
+                        ]"
+                        label="IP Configuration"
+                        variant="outlined"
+                        hint="Applied on the next boot / wake"
+                        persistent-hint
+                      />
+                    </v-col>
+                  </v-row>
+                  <v-row v-if="settingsStore.deviceSettings.ipMode === 'static'">
+                    <v-col cols="12" md="4">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.staticIp"
+                        label="IP Address"
+                        variant="outlined"
+                        placeholder="192.168.1.50"
+                      />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.staticNetmask"
+                        label="Netmask"
+                        variant="outlined"
+                      />
+                    </v-col>
+                    <v-col cols="12" md="4">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.staticGateway"
+                        label="Gateway"
+                        variant="outlined"
+                        placeholder="192.168.1.1"
+                      />
+                    </v-col>
+                  </v-row>
+                  <v-row>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.dnsServer"
+                        label="DNS Server"
+                        variant="outlined"
+                        :hint="
+                          settingsStore.deviceSettings.ipMode === 'static'
+                            ? 'Leave empty to use the gateway'
+                            : 'Optional override; leave empty to use DHCP-provided DNS'
+                        "
+                        persistent-hint
+                      />
+                    </v-col>
+                  </v-row>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
           </v-tabs-window-item>
 
           <!-- Auto Rotate Tab -->

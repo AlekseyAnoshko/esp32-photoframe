@@ -19,6 +19,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 #include "image_processor.h"
 #include "mdns_service.h"
 #include "nvs.h"
@@ -166,11 +167,58 @@ esp_err_t apply_config_from_json(cJSON *root)
         tzset();
     }
 
+    // Advanced network settings (#43): custom NTP server, static IP and DNS
+    // override. Addresses are validated before persisting so a typo can't
+    // strand the frame on an unreachable address; IP settings apply on the
+    // next connect (reboot/wake).
     item = cJSON_GetObjectItem(root, "ntp_server");
     if (item && cJSON_IsString(item)) {
         config_manager_set_ntp_server(cJSON_GetStringValue(item));
         periodic_tasks_force_run(SNTP_TASK_NAME);
         periodic_tasks_check_and_run();
+    }
+
+    item = cJSON_GetObjectItem(root, "ip_mode");
+    if (item && cJSON_IsString(item)) {
+        bool want_static = (strcmp(cJSON_GetStringValue(item), "static") == 0);
+        if (want_static) {
+            cJSON *ip = cJSON_GetObjectItem(root, "static_ip");
+            cJSON *mask = cJSON_GetObjectItem(root, "static_netmask");
+            cJSON *gw = cJSON_GetObjectItem(root, "static_gateway");
+            esp_ip4_addr_t parsed;
+            if (!ip || !cJSON_IsString(ip) ||
+                esp_netif_str_to_ip4(cJSON_GetStringValue(ip), &parsed) != ESP_OK) {
+                utils_set_config_error("Invalid static IP address");
+                return ESP_FAIL;
+            }
+            if (!mask || !cJSON_IsString(mask) ||
+                esp_netif_str_to_ip4(cJSON_GetStringValue(mask), &parsed) != ESP_OK) {
+                utils_set_config_error("Invalid static netmask");
+                return ESP_FAIL;
+            }
+            if (!gw || !cJSON_IsString(gw) ||
+                esp_netif_str_to_ip4(cJSON_GetStringValue(gw), &parsed) != ESP_OK) {
+                utils_set_config_error("Invalid static gateway");
+                return ESP_FAIL;
+            }
+            config_manager_set_static_ip(cJSON_GetStringValue(ip));
+            config_manager_set_static_netmask(cJSON_GetStringValue(mask));
+            config_manager_set_static_gateway(cJSON_GetStringValue(gw));
+            config_manager_set_ip_mode(IP_MODE_STATIC);
+        } else {
+            config_manager_set_ip_mode(IP_MODE_DHCP);
+        }
+    }
+
+    item = cJSON_GetObjectItem(root, "dns_server");
+    if (item && cJSON_IsString(item)) {
+        const char *dns = cJSON_GetStringValue(item);
+        esp_ip4_addr_t parsed;
+        if (dns[0] != '\0' && esp_netif_str_to_ip4(dns, &parsed) != ESP_OK) {
+            utils_set_config_error("Invalid DNS server address");
+            return ESP_FAIL;
+        }
+        config_manager_set_dns_server(dns);
     }
 
     // WiFi

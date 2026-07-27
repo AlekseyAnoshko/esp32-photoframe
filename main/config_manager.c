@@ -15,11 +15,19 @@ static const char *TAG = "config_manager";
 // General
 static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static char tz_string[TIMEZONE_MAX_LEN] = {0};
-static char ntp_server[NTP_SERVER_MAX_LEN] = {0};
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
 static int display_rotation_deg = BOARD_HAL_DISPLAY_ROTATION_DEG;
 static char wifi_ssid[WIFI_SSID_MAX_LEN] = {0};
 static char wifi_password[WIFI_PASS_MAX_LEN] = {0};
+
+// Advanced network settings (collapsed section in the UI): custom NTP server,
+// static IP instead of DHCP, and DNS override
+static char ntp_server[NTP_SERVER_MAX_LEN] = {0};
+static ip_mode_t ip_mode = IP_MODE_DHCP;
+static char static_ip[IP_ADDR_STR_MAX_LEN] = {0};
+static char static_netmask[IP_ADDR_STR_MAX_LEN] = {0};
+static char static_gateway[IP_ADDR_STR_MAX_LEN] = {0};
+static char dns_server[IP_ADDR_STR_MAX_LEN] = {0};
 
 // Auto Rotate
 static bool auto_rotate_enabled = false;
@@ -174,6 +182,26 @@ esp_err_t config_manager_init(void)
             strncpy(ntp_server, DEFAULT_NTP_SERVER, NTP_SERVER_MAX_LEN - 1);
             ntp_server[NTP_SERVER_MAX_LEN - 1] = '\0';
             ESP_LOGI(TAG, "No NTP server in NVS, using default: %s", ntp_server);
+        }
+
+        // Advanced network settings
+        uint8_t stored_ip_mode = IP_MODE_DHCP;
+        if (nvs_get_u8(nvs_handle, NVS_IP_MODE_KEY, &stored_ip_mode) == ESP_OK) {
+            ip_mode = (ip_mode_t) stored_ip_mode;
+        }
+        size_t addr_len = sizeof(static_ip);
+        nvs_get_str(nvs_handle, NVS_STATIC_IP_KEY, static_ip, &addr_len);
+        addr_len = sizeof(static_netmask);
+        nvs_get_str(nvs_handle, NVS_STATIC_NETMASK_KEY, static_netmask, &addr_len);
+        addr_len = sizeof(static_gateway);
+        nvs_get_str(nvs_handle, NVS_STATIC_GATEWAY_KEY, static_gateway, &addr_len);
+        addr_len = sizeof(dns_server);
+        nvs_get_str(nvs_handle, NVS_DNS_SERVER_KEY, dns_server, &addr_len);
+        if (ip_mode == IP_MODE_STATIC) {
+            ESP_LOGI(TAG, "Static IP configured: %s/%s gw %s dns %s", static_ip, static_netmask,
+                     static_gateway, dns_server[0] ? dns_server : "(auto)");
+        } else if (dns_server[0]) {
+            ESP_LOGI(TAG, "DNS override configured: %s", dns_server);
         }
 
         uint8_t stored_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
@@ -502,6 +530,85 @@ const char *config_manager_get_ntp_server(void)
     return ntp_server;
 }
 
+// ----------------------------------------------------------------------------
+// Advanced network settings
+// ----------------------------------------------------------------------------
+
+// Persist one dotted-IPv4 string setting (helper for the network settings).
+static void set_ip_str(const char *nvs_key, char *cache, const char *value)
+{
+    if (value == NULL) {
+        value = "";
+    }
+    strncpy(cache, value, IP_ADDR_STR_MAX_LEN - 1);
+    cache[IP_ADDR_STR_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, nvs_key, cache);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+void config_manager_set_ip_mode(ip_mode_t mode)
+{
+    ip_mode = mode;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_IP_MODE_KEY, (uint8_t) mode);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+    ESP_LOGI(TAG, "IP mode set to: %s", mode == IP_MODE_STATIC ? "static" : "dhcp");
+}
+
+ip_mode_t config_manager_get_ip_mode(void)
+{
+    return ip_mode;
+}
+
+void config_manager_set_static_ip(const char *ip)
+{
+    set_ip_str(NVS_STATIC_IP_KEY, static_ip, ip);
+}
+
+const char *config_manager_get_static_ip(void)
+{
+    return static_ip;
+}
+
+void config_manager_set_static_netmask(const char *mask)
+{
+    set_ip_str(NVS_STATIC_NETMASK_KEY, static_netmask, mask);
+}
+
+const char *config_manager_get_static_netmask(void)
+{
+    return static_netmask;
+}
+
+void config_manager_set_static_gateway(const char *gw)
+{
+    set_ip_str(NVS_STATIC_GATEWAY_KEY, static_gateway, gw);
+}
+
+const char *config_manager_get_static_gateway(void)
+{
+    return static_gateway;
+}
+
+void config_manager_set_dns_server(const char *dns)
+{
+    set_ip_str(NVS_DNS_SERVER_KEY, dns_server, dns);
+}
+
+const char *config_manager_get_dns_server(void)
+{
+    return dns_server;
+}
+
 void config_manager_set_display_orientation(display_orientation_t orientation)
 {
     display_orientation = orientation;
@@ -725,6 +832,7 @@ int32_t config_manager_get_last_index(void)
 {
     return last_index;
 }
+
 // ============================================================================
 // Auto Rotate - URL
 // ============================================================================

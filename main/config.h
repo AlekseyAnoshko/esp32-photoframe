@@ -15,6 +15,12 @@ typedef enum {
     DISPLAY_ORIENTATION_PORTRAIT = 1
 } display_orientation_t;
 
+// IP configuration mode (#43): DHCP (default) or a static address. The DNS
+// override is independent — it applies in both modes (empty = automatic).
+typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
+
+#define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
+
 #define DEVICE_NAME_MAX_LEN 64
 #define WIFI_SSID_MAX_LEN 32
 #define WIFI_PASS_MAX_LEN 64
@@ -99,9 +105,17 @@ typedef enum {
 #define NVS_SETUP_COMPLETE_KEY "setup_complete"
 #define NVS_DEVICE_NAME_KEY "device_name"
 #define NVS_TIMEZONE_KEY "timezone"
-#define NVS_NTP_SERVER_KEY "ntp_server"
 #define NVS_DISPLAY_ORIENTATION_KEY "disp_orient"
 #define NVS_DISPLAY_ROTATION_DEG_KEY "disp_rot_deg"
+
+// Advanced network settings (collapsed section in the UI): custom NTP server,
+// static IP instead of DHCP, and DNS override (#43)
+#define NVS_NTP_SERVER_KEY "ntp_server"
+#define NVS_IP_MODE_KEY "ip_mode"
+#define NVS_STATIC_IP_KEY "static_ip"
+#define NVS_STATIC_NETMASK_KEY "static_mask"
+#define NVS_STATIC_GATEWAY_KEY "static_gw"
+#define NVS_DNS_SERVER_KEY "dns_server"
 
 // Auto Rotate
 #define NVS_AUTO_ROTATE_KEY "auto_rotate"

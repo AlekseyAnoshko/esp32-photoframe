@@ -282,6 +282,43 @@ static esp_err_t provision_scan_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Extract one field from a URL-encoded form body ("key=value&..."), decoding
+// '+' and %XX escapes. Returns true when the key is present (value may be
+// empty). Unlike the positional parsing above, this is order-independent.
+static bool get_form_field(const char *buf, const char *key, char *out, size_t out_len)
+{
+    size_t key_len = strlen(key);
+    const char *p = buf;
+    while ((p = strstr(p, key)) != NULL) {
+        // Must be the start of a field: beginning of buffer or right after '&',
+        // and followed by '='.
+        if ((p == buf || p[-1] == '&') && p[key_len] == '=') {
+            break;
+        }
+        p += key_len;
+    }
+    if (p == NULL) {
+        return false;
+    }
+
+    const char *v = p + key_len + 1;
+    size_t o = 0;
+    while (*v != '\0' && *v != '&' && o < out_len - 1) {
+        if (*v == '+') {
+            out[o++] = ' ';
+            v++;
+        } else if (*v == '%' && v[1] != '\0' && v[2] != '\0') {
+            char hex[3] = {v[1], v[2], 0};
+            out[o++] = (char) strtol(hex, NULL, 16);
+            v += 3;
+        } else {
+            out[o++] = *v++;
+        }
+    }
+    out[o] = '\0';
+    return true;
+}
+
 static esp_err_t provision_save_handler(httpd_req_t *req)
 {
     char buf[512];
@@ -296,82 +333,67 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
     char password[WIFI_PASS_MAX_LEN] = {0};
     char device_name[DEVICE_NAME_MAX_LEN] = {0};
 
-    char *ssid_start = strstr(buf, "ssid=");
-    char *pass_start = strstr(buf, "&password=");
-    char *name_start = strstr(buf, "&deviceName=");
-
-    if (!ssid_start) {
+    // Order-independent, URL-decoding field extraction. The previous
+    // positional parser sliced deviceName from "&deviceName=" to the END of
+    // the body, so any field appended after it (the #43 network settings) got
+    // swallowed into the device name — and, via hostname sanitization, into
+    // the mDNS name (e.g. "...-ipmode-dhcp.local").
+    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
     }
-
-    ssid_start += 5;
-    char *ssid_end = pass_start ? pass_start : (buf + ret);
-    int ssid_len = ssid_end - ssid_start;
-    if (ssid_len > 0 && ssid_len < WIFI_SSID_MAX_LEN) {
-        strncpy(ssid, ssid_start, ssid_len);
-        ssid[ssid_len] = '\0';
-
-        for (int i = 0; i < ssid_len; i++) {
-            if (ssid[i] == '+')
-                ssid[i] = ' ';
-            if (ssid[i] == '%' && i + 2 < ssid_len) {
-                char hex[3] = {ssid[i + 1], ssid[i + 2], 0};
-                ssid[i] = (char) strtol(hex, NULL, 16);
-                memmove(&ssid[i + 1], &ssid[i + 3], ssid_len - i - 2);
-                ssid_len -= 2;
-            }
-        }
-    }
-
-    if (pass_start) {
-        pass_start += 10;
-        char *pass_end = name_start ? name_start : (buf + ret);
-        int pass_len = pass_end - pass_start;
-        if (pass_len > 0 && pass_len < WIFI_PASS_MAX_LEN) {
-            strncpy(password, pass_start, pass_len);
-            password[pass_len] = '\0';
-
-            for (int i = 0; i < pass_len; i++) {
-                if (password[i] == '+')
-                    password[i] = ' ';
-                if (password[i] == '%' && i + 2 < pass_len) {
-                    char hex[3] = {password[i + 1], password[i + 2], 0};
-                    password[i] = (char) strtol(hex, NULL, 16);
-                    memmove(&password[i + 1], &password[i + 3], pass_len - i - 2);
-                    pass_len -= 2;
-                }
-            }
-        }
-    }
-
-    // Parse device name (optional)
-    if (name_start) {
-        name_start += 12;  // Skip "&deviceName="
-        int name_len = (buf + ret) - name_start;
-        if (name_len > 0 && name_len < DEVICE_NAME_MAX_LEN) {
-            strncpy(device_name, name_start, name_len);
-            device_name[name_len] = '\0';
-
-            // URL decode device name
-            for (int i = 0; i < name_len; i++) {
-                if (device_name[i] == '+')
-                    device_name[i] = ' ';
-                if (device_name[i] == '%' && i + 2 < name_len) {
-                    char hex[3] = {device_name[i + 1], device_name[i + 2], 0};
-                    device_name[i] = (char) strtol(hex, NULL, 16);
-                    memmove(&device_name[i + 1], &device_name[i + 3], name_len - i - 2);
-                    name_len -= 2;
-                }
-            }
-        }
-    }
+    get_form_field(buf, "password", password, sizeof(password));
+    get_form_field(buf, "deviceName", device_name, sizeof(device_name));
 
     // Use default if device name is empty
     if (strlen(device_name) == 0) {
         strncpy(device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
         device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
     }
+
+    // Optional network settings (#43): static IP + DNS override, for networks
+    // without DHCP. Validated here and applied below so the connection test
+    // runs with the exact configuration that will be saved. A save without
+    // ipMode=static always resets to DHCP — re-provisioning is the recovery
+    // path for a broken static config.
+    char ip_mode_str[8] = {0};
+    char field_ip[IP_ADDR_STR_MAX_LEN] = {0};
+    char field_mask[IP_ADDR_STR_MAX_LEN] = {0};
+    char field_gw[IP_ADDR_STR_MAX_LEN] = {0};
+    char field_dns[IP_ADDR_STR_MAX_LEN] = {0};
+    get_form_field(buf, "ipMode", ip_mode_str, sizeof(ip_mode_str));
+    bool want_static = (strcmp(ip_mode_str, "static") == 0);
+    if (want_static) {
+        esp_ip4_addr_t parsed;
+        if (!get_form_field(buf, "staticIp", field_ip, sizeof(field_ip)) ||
+            esp_netif_str_to_ip4(field_ip, &parsed) != ESP_OK ||
+            !get_form_field(buf, "staticNetmask", field_mask, sizeof(field_mask)) ||
+            esp_netif_str_to_ip4(field_mask, &parsed) != ESP_OK ||
+            !get_form_field(buf, "staticGateway", field_gw, sizeof(field_gw)) ||
+            esp_netif_str_to_ip4(field_gw, &parsed) != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "Invalid static IP configuration (IP, netmask and gateway must be "
+                                "valid IPv4 addresses)");
+            return ESP_FAIL;
+        }
+    }
+    if (get_form_field(buf, "dnsServer", field_dns, sizeof(field_dns)) && field_dns[0] != '\0') {
+        esp_ip4_addr_t parsed;
+        if (esp_netif_str_to_ip4(field_dns, &parsed) != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid DNS server address");
+            return ESP_FAIL;
+        }
+    }
+
+    if (want_static) {
+        config_manager_set_static_ip(field_ip);
+        config_manager_set_static_netmask(field_mask);
+        config_manager_set_static_gateway(field_gw);
+        config_manager_set_ip_mode(IP_MODE_STATIC);
+    } else {
+        config_manager_set_ip_mode(IP_MODE_DHCP);
+    }
+    config_manager_set_dns_server(field_dns);
 
     ESP_LOGI(TAG, "Received WiFi credentials - SSID: %s", ssid);
     ESP_LOGI(TAG, "Device name: %s", device_name);
@@ -389,6 +411,10 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
     sta_config.sta.pmf_cfg.required = false;
 
     esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+
+    // Apply the just-saved IP configuration (static address or DHCP) so the
+    // connection test exercises it (#43).
+    wifi_manager_apply_ip_config();
 
     // Disconnect first if already connected
     esp_wifi_disconnect();

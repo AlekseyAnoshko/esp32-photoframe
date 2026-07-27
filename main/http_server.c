@@ -1645,7 +1645,14 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
 
         const char *ntp_server = config_manager_get_ntp_server();
+        // Advanced network settings (#43): custom NTP, static IP, DNS override
         cJSON_AddStringToObject(root, "ntp_server", ntp_server ? ntp_server : DEFAULT_NTP_SERVER);
+        cJSON_AddStringToObject(root, "ip_mode",
+                                config_manager_get_ip_mode() == IP_MODE_STATIC ? "static" : "dhcp");
+        cJSON_AddStringToObject(root, "static_ip", config_manager_get_static_ip());
+        cJSON_AddStringToObject(root, "static_netmask", config_manager_get_static_netmask());
+        cJSON_AddStringToObject(root, "static_gateway", config_manager_get_static_gateway());
+        cJSON_AddStringToObject(root, "dns_server", config_manager_get_dns_server());
 
         const char *wifi_ssid = config_manager_get_wifi_ssid();
         cJSON_AddStringToObject(root, "wifi_ssid", wifi_ssid ? wifi_ssid : "");
