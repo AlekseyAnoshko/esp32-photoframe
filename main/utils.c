@@ -127,6 +127,7 @@ static char last_config_error[256] = {0};
 void utils_set_config_error(const char *msg)
 {
     if (msg) {
+        ESP_LOGW(TAG, "Config validation failed: %s", msg);
         strncpy(last_config_error, msg, sizeof(last_config_error) - 1);
         last_config_error[sizeof(last_config_error) - 1] = '\0';
     } else {
@@ -182,32 +183,38 @@ esp_err_t apply_config_from_json(cJSON *root)
     // its own (edited while already in static mode) or be absent when the
     // request merely flips ip_mode. Store what's present, then a switch to
     // static validates the effective (request-or-stored) values as a set.
+    // An empty string is accepted as "not set" (remote sync mirrors back the
+    // full config, including blank static fields on a DHCP device); switching
+    // to static mode below still validates the effective set.
     esp_ip4_addr_t parsed;
     item = cJSON_GetObjectItem(root, "static_ip");
     if (item && cJSON_IsString(item)) {
-        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+        const char *addr = cJSON_GetStringValue(item);
+        if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static IP address");
             return ESP_FAIL;
         }
-        config_manager_set_static_ip(cJSON_GetStringValue(item));
+        config_manager_set_static_ip(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_netmask");
     if (item && cJSON_IsString(item)) {
-        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+        const char *addr = cJSON_GetStringValue(item);
+        if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static netmask");
             return ESP_FAIL;
         }
-        config_manager_set_static_netmask(cJSON_GetStringValue(item));
+        config_manager_set_static_netmask(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_gateway");
     if (item && cJSON_IsString(item)) {
-        if (esp_netif_str_to_ip4(cJSON_GetStringValue(item), &parsed) != ESP_OK) {
+        const char *addr = cJSON_GetStringValue(item);
+        if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static gateway");
             return ESP_FAIL;
         }
-        config_manager_set_static_gateway(cJSON_GetStringValue(item));
+        config_manager_set_static_gateway(addr);
     }
 
     item = cJSON_GetObjectItem(root, "ip_mode");

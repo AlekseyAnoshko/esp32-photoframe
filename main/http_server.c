@@ -1759,9 +1759,14 @@ static esp_err_t config_handler(httpd_req_t *req)
         }
         buf[received] = '\0';
 
+        // Debug level only: the body can contain WiFi credentials and API keys.
+        ESP_LOGD(TAG, "Config %s request (%d bytes): %s",
+                 req->method == HTTP_PATCH ? "PATCH" : "POST", received, buf);
+
         cJSON *root = cJSON_Parse(buf);
         free(buf);
         if (!root) {
+            ESP_LOGW(TAG, "Config request rejected: invalid JSON");
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
             return ESP_FAIL;
         }
@@ -1775,6 +1780,8 @@ static esp_err_t config_handler(httpd_req_t *req)
 
             const char *config_err = utils_consume_config_error();
             const char *cert_err = utils_consume_cert_pin_error();
+            ESP_LOGW(TAG, "Config apply failed (config_err='%s', cert_err='%s')", config_err,
+                     cert_err);
             if (config_err && config_err[0] != '\0') {
                 cJSON_AddStringToObject(error_response, "message", config_err);
             } else if (cert_err && cert_err[0] != '\0') {
